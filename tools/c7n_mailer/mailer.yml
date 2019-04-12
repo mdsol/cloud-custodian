@@ -1,0 +1,25 @@
+# Which queue should we listen to for messages
+queue_url: "https://sqs.us-east-1.amazonaws.com/767904627276/CloudCustodian-Mailer"
+
+# Default from address
+from_address: cloud-infrastructure@mdsol.com
+
+
+# Tags that we should look at for address information
+contact_tags:
+  - OwnerContact
+  - OwnerEmail
+  - Owner
+  - SNSTopicARN
+
+## Standard Lambda Function Config
+region: us-east-1
+role: "arn:aws:iam::767904627276:role/CloudCustodian-Mailer"
+timeout: 300
+
+# Dead Letter Config is optional
+dead_letter_config:
+        TargetArn: "arn:aws:sqs:us-east-1:767904627276:CloudCustodian-MailerDLQ"
+
+org_domain: mdsol.com
+
