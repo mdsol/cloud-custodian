@@ -18,7 +18,6 @@ import functools
 import itertools
 
 from c7n.filters import ValueFilter
-from c7n.filters.core import set_annotation, ANNOTATION_KEY
 from c7n.manager import resources
 from c7n.query import QueryResourceManager
 from c7n.tags import universal_augment, register_universal_tags
@@ -105,11 +104,6 @@ class WorkspaceConnectionStatusFilter(ValueFilter):
                 annotate_map[status['WorkspaceId']][self.annotation_key] = status
         return list(filter(self, resources))
 
-    def __call__(self, ws):
-        if self.data.get('value_type') == 'resource_count':
-            return self.process(ws)
-
-        matched = self.match(ws[self.annotation_key])
-        if matched and self.annotate:
-            set_annotation(ws, ANNOTATION_KEY, self.k)
-        return matched
+    def get_resource_value(self, k, i):
+        return super(WorkspaceConnectionStatusFilter, self).get_resource_value(
+            k, i[self.annotation_key])
