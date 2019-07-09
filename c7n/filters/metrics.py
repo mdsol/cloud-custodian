@@ -175,19 +175,20 @@ class MetricsFilter(Filter):
                     EndTime=self.end,
                     Period=self.period,
                     Dimensions=dimensions)['Datapoints']
+
+            # In certain cases CloudWatch reports no data for a metric.
+            # If the policy specifies a fill value for missing data, add
+            # that here before testing for matches. Otherwise, skip
+            # matching entirely.
             if len(collected_metrics[key]) == 0:
-                # In certain cases CloudWatch reports no data for a metric.
-                # If the policy specifies a fill value for missing data, use
-                # that here before testing for matches. Otherwise, skip matching
-                # entirely.
-                if 'missing-fillvalue' in self.data:
-                    collected_metrics[key].append({
-                        'Timestamp': self.start,
-                        self.statistics: self.data['missing-fillvalue'],
-                        'c7n:detail': 'Fill value for missing data'
-                    })
-                else:
+                if 'missing-fillvalue' not in self.data:
                     continue
+                collected_metrics[key].append({
+                    'Timestamp': self.start,
+                    self.statistics: self.data['missing-fillvalue'],
+                    'c7n:detail': 'Fill value for missing data'
+                })
+
             if self.data.get('percent-attr'):
                 rvalue = r[self.data.get('percent-attr')]
                 if self.data.get('attr-multiplier'):
