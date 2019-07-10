@@ -964,7 +964,7 @@ class TestMissingMetrics(BaseTest):
                         "name": "RequestCount",
                         "op": "eq",
                         "statistics": "Sum",
-                        "missing-fillvalue": 0.0,
+                        "missing-value": 0.0,
                     }
                 ],
             },
