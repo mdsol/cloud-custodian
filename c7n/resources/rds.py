@@ -548,7 +548,8 @@ class Delete(BaseAction):
 
     schema = type_schema('delete', **{
         'skip-snapshot': {'type': 'boolean'},
-        'copy-restore-info': {'type': 'boolean'}
+        'copy-restore-info': {'type': 'boolean'},
+        'restore-info-separator': {'type': 'string'}
     })
 
     permissions = ('rds:DeleteDBInstance', 'rds:AddTagsToResource')
@@ -595,12 +596,8 @@ class Delete(BaseAction):
         return dbs
 
     def copy_restore_info(self, client, instance):
+        sep = self.data.get('restore-info-separator', ',')
         tags = []
-        tags.append({
-            'Key': 'VPCSecurityGroups',
-            'Value': ''.join([
-                g['VpcSecurityGroupId'] for g in instance['VpcSecurityGroups']
-            ])})
         tags.append({
             'Key': 'OptionGroupName',
             'Value': instance['OptionGroupMemberships'][0]['OptionGroupName']})
@@ -616,9 +613,23 @@ class Delete(BaseAction):
         tags.append({
             'Key': 'MultiAZ',
             'Value': str(instance['MultiAZ'])})
-        tags.append({
-            'Key': 'DBSubnetGroupName',
-            'Value': instance['DBSubnetGroup']['DBSubnetGroupName']})
+        # VPC Instance
+        if 'DBSubnetGroup' in instance:
+            tags.append({
+                'Key': 'DBSubnetGroupName',
+                'Value': instance['DBSubnetGroup']['DBSubnetGroupName']})
+            tags.append({
+                'Key': 'VPCSecurityGroups',
+                'Value': sep.join([
+                    g['VpcSecurityGroupId'] for g in instance['VpcSecurityGroups']
+                ])})
+        # EC2-Classic Instance
+        else:
+            tags.append({
+                'Key': 'DBSecurityGroups',
+                'Value': sep.join([
+                    g['DBSecurityGroupName'] for g in instance['DBSecurityGroups']
+                ])})
         client.add_tags_to_resource(
             ResourceName=self.manager.generate_arn(
                 instance['DBInstanceIdentifier']),
@@ -1056,7 +1067,9 @@ class RestoreInstance(BaseAction):
     schema = type_schema(
         'restore',
         restore_options={'type': 'object'},
-        modify_options={'type': 'object'})
+        modify_options={'type': 'object'},
+        **{'restore-info-separator': {'type': 'string'}}
+    )
 
     permissions = (
         'rds:ModifyDBInstance',
@@ -1070,6 +1083,10 @@ class RestoreInstance(BaseAction):
         'VPCSecurityGroups', 'MultiAZ', 'DBSubnetGroupName',
         'InstanceClass', 'StorageType', 'ParameterGroupName',
         'OptionGroupName'))
+    restore_keys_classic = (
+        restore_keys - {'DBSubnetGroupName', 'VPCSecurityGroups'} |  # Only used for VPC instances
+        {'DBSecurityGroups'}  # Only used for EC2-Classic instances
+    )
 
     def validate(self):
         found = False
@@ -1091,10 +1108,10 @@ class RestoreInstance(BaseAction):
             futures = {}
             for r in resources:
                 tags = {t['Key']: t['Value'] for t in r['Tags']}
-                if not set(tags).issuperset(self.restore_keys):
-                    self.log.warning(
-                        "snapshot:%s missing restore tags",
-                        r['DBSnapshotIdentifier'])
+                if not (self.restore_keys.issubset(tags) or
+                        self.restore_keys_classic.issubset(tags)):
+                    self.log.warning("snapshot:%s missing restore tags",
+                                     r['DBSnapshotIdentifier'])
                     continue
                 futures[w.submit(self.process_instance, client, r)] = r
             for f in as_completed(futures):
@@ -1125,24 +1142,29 @@ class RestoreInstance(BaseAction):
             ForceFailover=False)
 
     def get_restore_from_tags(self, snapshot):
+        sep = self.data.get('restore-info-separator', ',')
         params, post_modify = {}, {}
         tags = {t['Key']: t['Value'] for t in snapshot['Tags']}
+
+        if self.restore_keys.issubset(tags):
+            params['DBSubnetGroupName'] = tags['DBSubnetGroupName']
+            post_modify['VpcSecurityGroupIds'] = tags['VPCSecurityGroups'].split(sep)
+        elif self.restore_keys_classic.issubset(tags):
+            post_modify['DBSecurityGroups'] = tags['DBSecurityGroups'].split(sep)
 
         params['DBInstanceIdentifier'] = snapshot['DBInstanceIdentifier']
         params['DBSnapshotIdentifier'] = snapshot['DBSnapshotIdentifier']
         params['MultiAZ'] = tags['MultiAZ'] == 'True' and True or False
-        params['DBSubnetGroupName'] = tags['DBSubnetGroupName']
         params['DBInstanceClass'] = tags['InstanceClass']
         params['CopyTagsToSnapshot'] = True
         params['StorageType'] = tags['StorageType']
         params['OptionGroupName'] = tags['OptionGroupName']
 
         post_modify['DBParameterGroupName'] = tags['ParameterGroupName']
-        post_modify['VpcSecurityGroupIds'] = tags['VPCSecurityGroups'].split(',')
 
         params['Tags'] = [
             {'Key': k, 'Value': v} for k, v in tags.items()
-            if k not in self.restore_keys]
+            if k not in (self.restore_keys | self.restore_keys_classic)]
 
         params.update(self.data.get('restore_options', {}))
         post_modify.update(self.data.get('modify_options', {}))
