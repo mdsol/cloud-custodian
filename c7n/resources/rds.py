@@ -51,6 +51,8 @@ import operator
 import re
 from decimal import Decimal as D, ROUND_HALF_UP
 
+from datetime import datetime
+from dateutil.tz import tzutc
 from distutils.version import LooseVersion
 from botocore.exceptions import ClientError
 from concurrent.futures import as_completed
@@ -1003,7 +1005,9 @@ class LatestSnapshot(Filter):
                 resources, operator.itemgetter('DBInstanceIdentifier')):
             results.append(
                 sorted(snapshots,
-                       key=operator.itemgetter('SnapshotCreateTime'))[-1])
+                       key=lambda x: x.get(
+                           'SnapshotCreateTime',
+                           datetime(1900, 1, 1).replace(tzinfo=tzutc())))[-1])
         return results
 
 
